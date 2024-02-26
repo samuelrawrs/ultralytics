@@ -609,15 +609,32 @@ class Model(nn.Module):
             ModuleNotFoundError: If the HUB SDK is not installed.
         """
         self._check_is_pytorch_model()
+
+        local_hyp = kwargs.get('hyp', None)  # Store "hyp" local parameter
+
         if hasattr(self.session, "model") and self.session.model.id:  # Ultralytics HUB session with loaded model
             if any(kwargs):
                 LOGGER.warning("WARNING ⚠️ using HUB training arguments, ignoring local training arguments.")
             kwargs = self.session.train_args  # overwrite kwargs
 
+        if local_hyp is not None:
+            kwargs['hyp'] = local_hyp  # Reapply local hyp argument after setting HUB arguments
+
         checks.check_pip_update_available()
 
         overrides = yaml_load(checks.check_yaml(kwargs["cfg"])) if kwargs.get("cfg") else self.overrides
         custom = {"data": DEFAULT_CFG_DICT["data"] or TASK2DATA[self.task]}  # method defaults
+
+        if kwargs.get('hyp'):
+            if isinstance(kwargs['hyp'], dict):
+                LOGGER.warning(f"hyp dict passed. Overriding params with {kwargs['hyp']}.")
+                config = kwargs['hyp']
+                for k, v in list(config.items()):
+                    if v is None:
+                        del config[k]
+                overrides.update(config)
+                del kwargs['hyp']
+
         args = {**overrides, **custom, **kwargs, "mode": "train"}  # highest priority args on the right
         if args.get("resume"):
             args["resume"] = self.ckpt_path
@@ -639,6 +656,7 @@ class Model(nn.Module):
                 except (PermissionError, ModuleNotFoundError):
                     # Ignore PermissionError and ModuleNotFoundError which indicates hub-sdk not installed
                     pass
+        LOGGER.warning(f"Final training configuration (args): {args} and overrides: {overrides}")
 
         self.trainer.hub_session = self.session  # attach optional HUB session
         self.trainer.train()
